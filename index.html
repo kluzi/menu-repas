@@ -32,6 +32,7 @@ img{max-width:100%}
   --soir-bg: #CDE6E0;
   --soir-ink: #14403A;
   --free-bg: #E4E8E2;
+  --danger: #B3261E;
   --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
   --font-body: "Figtree", "Segoe UI", system-ui, sans-serif;
 }
@@ -41,7 +42,7 @@ img{max-width:100%}
     --accent: #5CC389; --accent-ink: #0F1A13;
     --midi-bg: #34401A; --midi-ink: #D5E6A6;
     --soir-bg: #1B3D3A; --soir-ink: #A9DCD2;
-    --free-bg: #26332B;
+    --free-bg: #26332B; --danger: #FF8A80;
     color-scheme: dark;
   }
 }
@@ -50,7 +51,7 @@ img{max-width:100%}
   --accent: #5CC389; --accent-ink: #0F1A13;
   --midi-bg: #34401A; --midi-ink: #D5E6A6;
   --soir-bg: #1B3D3A; --soir-ink: #A9DCD2;
-  --free-bg: #26332B;
+  --free-bg: #26332B; --danger: #FF8A80;
   color-scheme: dark;
 }
 
@@ -182,6 +183,32 @@ button { font: inherit; }
 .card p b { font-weight: 600; color: var(--ink); }
 .none { color: var(--muted); font-size: 13.5px; padding: 8px 2px; }
 
+/* Ajout d'un plat depuis la boîte « Plats » */
+.pool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.pool-head h2 { margin: 0; }
+.addbtn {
+  flex: none; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center;
+}
+.addbtn:hover { filter: brightness(1.08); }
+.addbtn svg { transition: transform 140ms; }
+.addbtn[aria-expanded="true"] svg { transform: rotate(45deg); }
+.addform {
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; margin-bottom: 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+}
+.addform label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.addform label span { font-weight: 400; }
+.addform input {
+  width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font: inherit;
+}
+.adderr { margin: 0; font-size: 12.5px; color: var(--danger); }
+.adderr:empty { display: none; }
+.addactions { display: flex; gap: 8px; margin-top: 2px; }
+.addbtn:focus-visible, .addform input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card.fresh { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+
 /* Barre de sélection (téléphone) */
 .pickbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
@@ -228,7 +255,23 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
 
     <aside class="pool" id="pool" aria-label="Plats disponibles">
       <div class="pool-inner">
-        <h2 id="pooltitle">Plats</h2>
+        <div class="pool-head">
+          <h2 id="pooltitle">Plats</h2>
+          <button class="addbtn" id="addbtn" type="button" aria-label="Ajouter un plat" title="Ajouter un plat" aria-expanded="false" aria-controls="addform">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+        <form class="addform" id="addform" hidden autocomplete="off">
+          <label for="newname">Nom du plat</label>
+          <input id="newname" type="text" maxlength="60" placeholder="Ex. Croque-madame">
+          <label for="newveg">Légumes <span>(facultatif)</span></label>
+          <input id="newveg" type="text" maxlength="120" placeholder="Ex. Épinards mixés dans la sauce">
+          <p class="adderr" id="adderr" role="alert"></p>
+          <div class="addactions">
+            <button class="btn primary" type="submit">Ajouter</button>
+            <button class="btn" type="button" id="addcancel">Annuler</button>
+          </div>
+        </form>
         <input id="q" type="search" placeholder="Chercher un plat" autocomplete="off">
         <div class="pool-list" id="list"></div>
       </div>
@@ -293,11 +336,16 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     { id: "s1", name: "Restes", special: true, note: "On finit le frigo" },
     { id: "s2", name: "Libre / restaurant", special: true, note: "Pas de cuisine ce repas" }
   ];
-  document.getElementById("pooltitle").textContent = "Plats (" + DISHES.length + ")";
-  var BY_ID = {};
-  DISHES.concat(SPECIALS).forEach(function (d) { BY_ID[d.id] = d; });
+  var CUSTOM = [];             // plats ajoutés depuis la page : { id, name, veg }
+  var BY_ID = {}, SORTED = [];
   // liste affichée par ordre alphabétique (accents ignorés); les cartes « Restes » et « Libre » restent à la fin
-  var SORTED = DISHES.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "fr", { sensitivity: "base" }); });
+  function rebuildDishes() {
+    BY_ID = {};
+    DISHES.concat(CUSTOM, SPECIALS).forEach(function (d) { BY_ID[d.id] = d; });
+    SORTED = DISHES.concat(CUSTOM).sort(function (a, b) { return a.name.localeCompare(b.name, "fr", { sensitivity: "base" }); });
+    document.getElementById("pooltitle").textContent = "Plats (" + SORTED.length + ")";
+  }
+  rebuildDishes();
 
   /* ---------- semaines ---------- */
   var WD = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -350,10 +398,10 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     if (!ids.length) {
       return '<div class="slot empty" data-slot="' + key + '" tabindex="0" role="button" aria-label="Créneau libre">Déposer un plat</div>';
     }
-    var onlySpecial = ids.every(function (id) { return BY_ID[id].special; });
+    var onlySpecial = ids.every(function (id) { return BY_ID[id] && BY_ID[id].special; });
     var kind = onlySpecial ? "free" : (key.slice(-1) === "m" ? "midi" : "soir");
     var chips = ids.map(function (id, i) {
-      var d = BY_ID[id];
+      var d = BY_ID[id] || { id: id, name: "Plat en chargement…" };
       return '<div class="chip" draggable="true" data-dish="' + d.id + '" data-from="' + key + '" data-i="' + i + '">' +
         '<span class="chip-name">' + esc(d.name) + '</span>' +
         '<button class="x" type="button" data-clear="' + key + '" data-i="' + i + '" aria-label="Retirer ' + esc(d.name) + '">×</button>' +
@@ -389,7 +437,7 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     var badge = c[d.id] ? '<span class="count" title="Déjà planifié">×' + c[d.id] + '</span>' : "";
     var body = d.special
       ? '<p>' + esc(d.note) + '</p>'
-      : '<p><b>Légumes :</b> ' + esc(d.veg) + '</p>';
+      : (d.veg ? '<p><b>Légumes :</b> ' + esc(d.veg) + '</p>' : '');
     return '<div class="card' + (d.special ? " special" : "") + '" draggable="true" tabindex="0" role="button" data-dish="' + d.id +
       '" aria-pressed="' + (selected === d.id ? "true" : "false") + '">' +
       '<div class="card-top"><span class="card-name">' + esc(d.name) + '</span>' + badge + '</div>' + body + '</div>';
@@ -448,7 +496,7 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
       var v = obj[k];
       if (typeof v === "string") v = [v];
       if (!Array.isArray(v)) return;
-      v = v.filter(function (id, i) { return BY_ID[id] && v.indexOf(id) === i; }).slice(0, 2);
+      v = v.filter(function (id, i) { return typeof id === "string" && v.indexOf(id) === i; }).slice(0, 2);
       if (v.length) out[k] = v;
     });
     return out;
@@ -690,7 +738,89 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
   });
   syncModeBtn();
 
+  /* ---------- ajouter un plat ---------- */
+  var CUSTOM_KEY = "planning-repas-plats-v1";
+  var pushed = {};
+  var $addBtn = document.getElementById("addbtn"), $addForm = document.getElementById("addform");
+  var $newName = document.getElementById("newname"), $newVeg = document.getElementById("newveg");
+  var $addErr = document.getElementById("adderr");
+
+  function validDish(d) { return !!d && typeof d.id === "string" && typeof d.name === "string" && d.name.trim() !== ""; }
+  function saveCustomLocal() { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(CUSTOM)); } catch (e) {} }
+  function loadCustomLocal() {
+    try {
+      var arr = JSON.parse(localStorage.getItem(CUSTOM_KEY) || "[]");
+      if (Array.isArray(arr)) CUSTOM = arr.filter(validDish);
+    } catch (e) {}
+  }
+  function openForm(open) {
+    $addForm.hidden = !open;
+    $addBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    $addErr.textContent = "";
+    if (open) { $newName.focus(); } else { $newName.value = ""; $newVeg.value = ""; }
+  }
+  $addBtn.addEventListener("click", function () { openForm($addForm.hidden); });
+  document.getElementById("addcancel").addEventListener("click", function () { openForm(false); $addBtn.focus(); });
+  $addForm.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { openForm(false); $addBtn.focus(); }
+  });
+  $addForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var name = $newName.value.trim().replace(/\s+/g, " ");
+    var veg = $newVeg.value.trim();
+    if (!name) { $addErr.textContent = "Donne un nom au plat."; $newName.focus(); return; }
+    var key = norm(name);
+    if (SORTED.some(function (d) { return norm(d.name) === key; })) {
+      $addErr.textContent = "Ce plat existe déjà dans la liste."; $newName.focus(); return;
+    }
+    var dish = { id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name, veg: veg };
+    CUSTOM.push(dish);
+    saveCustomLocal();
+    if (db) {
+      pushed[dish.id] = true;
+      db.collection("dishes").doc(dish.id).set({ name: dish.name, veg: dish.veg }).catch(function () {});
+    }
+    rebuildDishes();
+    filter = ""; document.getElementById("q").value = "";
+    openForm(false);
+    renderPool();
+    var card = $list.querySelector('[data-dish="' + dish.id + '"]');
+    if (card) {
+      card.scrollIntoView({ block: "nearest" });
+      card.classList.add("fresh");
+      setTimeout(function () { card.classList.remove("fresh"); }, 1800);
+    }
+  });
+
+  // Un document par plat ajouté : dishes/<id>. Les plats créés avant la connexion à la base y sont envoyés.
+  function subscribeDishes() {
+    if (!db) return;
+    var col = db.collection("dishes");
+    col.onSnapshot(function (snap) {
+      var remote = [], known = {};
+      snap.docs.forEach(function (doc) {
+        var data = doc.data() || {};
+        var d = { id: doc.id, name: String(data.name || ""), veg: String(data.veg || "") };
+        if (validDish(d)) { remote.push(d); known[d.id] = true; }
+      });
+      CUSTOM.forEach(function (d) {
+        if (known[d.id]) return;
+        remote.push(d);
+        if (!pushed[d.id]) {
+          pushed[d.id] = true;
+          col.doc(d.id).set({ name: d.name, veg: d.veg || "" }).catch(function () {});
+        }
+      });
+      CUSTOM = remote;
+      saveCustomLocal();
+      rebuildDishes();
+      render();
+    }, function () {});
+  }
+
   /* ---------- démarrage ---------- */
+  loadCustomLocal();
+  rebuildDishes();
   loadLocal();
   render();
 
@@ -698,7 +828,7 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     try {
       if (!window.claude || !window.claude.use) return;
       db = await window.claude.use("db");
-      if (db) subscribe();
+      if (db) { subscribe(); subscribeDishes(); }
     } catch (e) { db = null; ref = null; }
   })();
 })();
