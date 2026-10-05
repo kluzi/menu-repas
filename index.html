@@ -187,10 +187,10 @@ button { font: inherit; }
 .pool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .pool-head h2 { margin: 0; }
 .addbtn {
-  flex: none; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
-  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center;
+  flex: none; width: 32px; height: 32px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); cursor: pointer;
+  background: transparent; color: var(--muted); display: grid; place-items: center;
 }
-.addbtn:hover { filter: brightness(1.08); }
+.addbtn:hover, .addbtn[aria-expanded="true"] { border-color: var(--muted); color: var(--ink); background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .addbtn svg { transition: transform 140ms; }
 .addbtn[aria-expanded="true"] svg { transform: rotate(45deg); }
 .addform {
