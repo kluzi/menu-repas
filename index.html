@@ -207,6 +207,13 @@ button { font: inherit; }
 .adderr:empty { display: none; }
 .addactions { display: flex; gap: 8px; margin-top: 2px; }
 .addbtn:focus-visible, .addform input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card-right { display: flex; align-items: center; gap: 6px; flex: none; }
+.editbtn {
+  width: 26px; height: 26px; margin: -3px -5px -3px 0; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); opacity: .6; cursor: pointer; display: grid; place-items: center;
+}
+.editbtn:hover, .editbtn:focus-visible { opacity: 1; color: var(--ink); background: color-mix(in srgb, var(--muted) 16%, transparent); }
+.editbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card.fresh { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
 
 /* Barre de sélection (téléphone) */
@@ -336,13 +343,18 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     { id: "s1", name: "Restes", special: true, note: "On finit le frigo" },
     { id: "s2", name: "Libre / restaurant", special: true, note: "Pas de cuisine ce repas" }
   ];
+  var EDITS = {};              // modifications des plats d'origine : id -> { name, veg }
   var CUSTOM = [];             // plats ajoutés depuis la page : { id, name, veg }
   var BY_ID = {}, SORTED = [];
   // liste affichée par ordre alphabétique (accents ignorés); les cartes « Restes » et « Libre » restent à la fin
   function rebuildDishes() {
     BY_ID = {};
-    DISHES.concat(CUSTOM, SPECIALS).forEach(function (d) { BY_ID[d.id] = d; });
-    SORTED = DISHES.concat(CUSTOM).sort(function (a, b) { return a.name.localeCompare(b.name, "fr", { sensitivity: "base" }); });
+    var base = DISHES.map(function (d) {
+      var e = EDITS[d.id];
+      return e ? { id: d.id, name: e.name, veg: e.veg || "", alt: d.alt } : d;
+    });
+    base.concat(CUSTOM, SPECIALS).forEach(function (d) { BY_ID[d.id] = d; });
+    SORTED = base.concat(CUSTOM).sort(function (a, b) { return a.name.localeCompare(b.name, "fr", { sensitivity: "base" }); });
     document.getElementById("pooltitle").textContent = "Plats (" + SORTED.length + ")";
   }
   rebuildDishes();
@@ -440,7 +452,9 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
       : (d.veg ? '<p><b>Légumes :</b> ' + esc(d.veg) + '</p>' : '');
     return '<div class="card' + (d.special ? " special" : "") + '" draggable="true" tabindex="0" role="button" data-dish="' + d.id +
       '" aria-pressed="' + (selected === d.id ? "true" : "false") + '">' +
-      '<div class="card-top"><span class="card-name">' + esc(d.name) + '</span>' + badge + '</div>' + body + '</div>';
+      '<div class="card-top"><span class="card-name">' + esc(d.name) + '</span><span class="card-right">' + badge +
+      (d.special ? '' : '<button class="editbtn" type="button" data-edit="' + d.id + '" aria-label="Modifier ' + esc(d.name) + '" title="Modifier"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></button>') +
+      '</span></div>' + body + '</div>';
   }
 
   function renderPool() {
@@ -544,6 +558,8 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
   });
 
   $list.addEventListener("click", function (e) {
+    var eb = e.target.closest(".editbtn");
+    if (eb) { e.stopPropagation(); startEdit(eb.getAttribute("data-edit")); return; }
     var card = e.target.closest(".card");
     if (!card) return;
     var id = card.getAttribute("data-dish");
@@ -743,7 +759,7 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
   var pushed = {};
   var $addBtn = document.getElementById("addbtn"), $addForm = document.getElementById("addform");
   var $newName = document.getElementById("newname"), $newVeg = document.getElementById("newveg");
-  var $addErr = document.getElementById("adderr");
+  var $addErr = document.getElementById("adderr"), $pool = document.querySelector(".pool-inner");
 
   function validDish(d) { return !!d && typeof d.id === "string" && typeof d.name === "string" && d.name.trim() !== ""; }
   function saveCustomLocal() { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(CUSTOM)); } catch (e) {} }
@@ -753,13 +769,33 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
       if (Array.isArray(arr)) CUSTOM = arr.filter(validDish);
     } catch (e) {}
   }
-  function openForm(open) {
+  var EDITS_KEY = "planning-repas-edits-v1", editingId = null;
+  var $submit = $addForm.querySelector('button[type="submit"]');
+  function saveEditsLocal() { try { localStorage.setItem(EDITS_KEY, JSON.stringify(EDITS)); } catch (e) {} }
+  function loadEditsLocal() {
+    try {
+      var o = JSON.parse(localStorage.getItem(EDITS_KEY) || "{}");
+      if (o && typeof o === "object") Object.keys(o).forEach(function (k) {
+        if (o[k] && typeof o[k].name === "string" && o[k].name.trim()) EDITS[k] = { name: o[k].name, veg: String(o[k].veg || "") };
+      });
+    } catch (e) {}
+  }
+  function startEdit(id) {
+    var d = BY_ID[id];
+    if (!d || d.special) return;
+    openForm(true, d);
+    $pool.scrollTop = 0;
+  }
+  function openForm(open, dish) {
+    editingId = open && dish ? dish.id : null;
+    $submit.textContent = editingId ? "Enregistrer" : "Ajouter";
+    $addBtn.setAttribute("aria-label", editingId ? "Fermer" : "Ajouter un plat");
     $addForm.hidden = !open;
     $addBtn.setAttribute("aria-expanded", open ? "true" : "false");
     $addErr.textContent = "";
-    if (open) { $newName.focus(); } else { $newName.value = ""; $newVeg.value = ""; }
+    if (open) { $newName.value = dish ? dish.name : ""; $newVeg.value = dish ? (dish.veg || "") : ""; $newName.focus(); } else { $newName.value = ""; $newVeg.value = ""; }
   }
-  $addBtn.addEventListener("click", function () { openForm($addForm.hidden); });
+  $addBtn.addEventListener("click", function () { openForm($addForm.hidden || !!editingId); });
   document.getElementById("addcancel").addEventListener("click", function () { openForm(false); $addBtn.focus(); });
   $addForm.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { openForm(false); $addBtn.focus(); }
@@ -770,8 +806,24 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
     var veg = $newVeg.value.trim();
     if (!name) { $addErr.textContent = "Donne un nom au plat."; $newName.focus(); return; }
     var key = norm(name);
-    if (SORTED.some(function (d) { return norm(d.name) === key; })) {
+    if (SORTED.some(function (d) { return d.id !== editingId && norm(d.name) === key; })) {
       $addErr.textContent = "Ce plat existe déjà dans la liste."; $newName.focus(); return;
+    }
+    if (editingId) {
+      var id = editingId, isBase = DISHES.some(function (d) { return d.id === id; });
+      if (isBase) {
+        EDITS[id] = { name: name, veg: veg }; saveEditsLocal();
+      } else {
+        CUSTOM.forEach(function (d) { if (d.id === id) { d.name = name; d.veg = veg; } });
+        saveCustomLocal();
+      }
+      if (db) { pushed[id] = true; db.collection("dishes").doc(id).set({ name: name, veg: veg }).catch(function () {}); }
+      rebuildDishes();
+      openForm(false);
+      render();
+      var ec = $list.querySelector('[data-dish="' + id + '"]');
+      if (ec) { ec.scrollIntoView({ block: "nearest" }); ec.classList.add("fresh"); setTimeout(function () { ec.classList.remove("fresh"); }, 1800); }
+      return;
     }
     var dish = { id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name, veg: veg };
     CUSTOM.push(dish);
@@ -800,6 +852,10 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
       var remote = [], known = {};
       snap.docs.forEach(function (doc) {
         var data = doc.data() || {};
+        if (DISHES.some(function (b) { return b.id === doc.id; })) {
+          if (String(data.name || "").trim()) EDITS[doc.id] = { name: String(data.name), veg: String(data.veg || "") };
+          return;
+        }
         var d = { id: doc.id, name: String(data.name || ""), veg: String(data.veg || "") };
         if (validDish(d)) { remote.push(d); known[d.id] = true; }
       });
@@ -812,14 +868,14 @@ catch (e) { document.documentElement.setAttribute("data-mode", "light"); }
         }
       });
       CUSTOM = remote;
-      saveCustomLocal();
+      saveCustomLocal(); saveEditsLocal();
       rebuildDishes();
       render();
     }, function () {});
   }
 
   /* ---------- démarrage ---------- */
-  loadCustomLocal();
+  loadCustomLocal(); loadEditsLocal();
   rebuildDishes();
   loadLocal();
   render();
